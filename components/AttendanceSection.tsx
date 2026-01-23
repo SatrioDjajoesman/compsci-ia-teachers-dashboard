@@ -30,6 +30,7 @@ export default function AttendanceSection() {
 
   // Form state
   const [sessionTitle, setSessionTitle] = useState('')
+  const [sessionDate, setSessionDate] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [selectedClasses, setSelectedClasses] = useState<ClassName[]>([])
@@ -56,7 +57,7 @@ export default function AttendanceSection() {
   const handleSessionSelect = async (session: Session) => {
     try {
       setLoading(true)
-      const related = await getRelatedSessions(session.title, session.start_time, session.end_time)
+      const related = await getRelatedSessions(session.title, session.date, session.start_time, session.end_time)
       setRelatedSessionsMap(related)
       setAllowedClasses(related.map((s: Session) => s.class_name))
       setSelectedSession(session)
@@ -83,6 +84,11 @@ export default function AttendanceSection() {
   useEffect(() => {
     if (showCreateModal) {
       setSelectedClasses([currentClass])
+      // Default to today's date if empty, but we leave it empty to show placeholder or let user decide
+      // Actually requirement says: "if Date is not filled, it will automatically use Today's current date."
+      // So we can leave it empty in UI and handle it on submit, or pre-fill it.
+      // Let's pre-fill it for better UX? No, requirement says "if Date is not filled". implying it can be empty.
+      setSessionDate('')
     }
   }, [showCreateModal, currentClass])
 
@@ -130,10 +136,12 @@ export default function AttendanceSection() {
     }
 
     try {
-      const title = sessionTitle || `Session at ${new Date().toLocaleString()}`
+      const dateToUse = sessionDate || new Date().toISOString().split('T')[0]
+      const title = sessionTitle || `Session at ${dateToUse} ${startTime}`
       
       const newSessions = selectedClasses.map(className => ({
         title,
+        date: dateToUse,
         start_time: startTime,
         end_time: endTime,
         class_name: className
@@ -144,6 +152,7 @@ export default function AttendanceSection() {
       toast.success(`Created session for ${selectedClasses.join(', ')}`)
       setShowCreateModal(false)
       setSessionTitle('')
+      setSessionDate('')
       setStartTime('')
       setEndTime('')
       setSelectedClasses([])
@@ -252,6 +261,12 @@ export default function AttendanceSection() {
     )
   }
 
+  // Helper to format time for display (remove seconds if present)
+  const formatTime = (time: string) => {
+    if (!time) return ''
+    return time.split(':').slice(0, 2).join(':')
+  }
+
   return (
     <div className="terminal-container h-full">
       <div className="terminal-section-header">
@@ -284,14 +299,26 @@ export default function AttendanceSection() {
                     value={sessionTitle}
                     onChange={(e) => setSessionTitle(e.target.value)}
                     className="terminal-input w-full"
-                    placeholder="Defaults to current date/time"
+                    placeholder="Defaults to Date + Time"
                   />
                 </div>
+                
+                <div>
+                  <label className="block text-secondary mb-1">Date (optional)</label>
+                  <input
+                    type="date"
+                    value={sessionDate}
+                    onChange={(e) => setSessionDate(e.target.value)}
+                    className="terminal-input w-full"
+                    placeholder="Defaults to Today"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-secondary mb-1">Start Time *</label>
                     <input
-                      type="datetime-local"
+                      type="time"
                       value={startTime}
                       onChange={(e) => setStartTime(e.target.value)}
                       className="terminal-input w-full"
@@ -301,7 +328,7 @@ export default function AttendanceSection() {
                   <div>
                     <label className="block text-secondary mb-1">End Time *</label>
                     <input
-                      type="datetime-local"
+                      type="time"
                       value={endTime}
                       onChange={(e) => setEndTime(e.target.value)}
                       className="terminal-input w-full"
@@ -356,7 +383,7 @@ export default function AttendanceSection() {
                 >
                   <div className="font-bold text-cyan">{session.title}</div>
                   <div className="text-secondary text-xs">
-                    {new Date(session.start_time).toLocaleString()} - {new Date(session.end_time).toLocaleString()}
+                    {new Date(session.date).toLocaleDateString()} | {formatTime(session.start_time)} - {formatTime(session.end_time)}
                   </div>
                 </div>
               ))}
@@ -370,7 +397,8 @@ export default function AttendanceSection() {
                   <span className="text-orange font-bold text-lg">{selectedSession.title}</span>
                 </div>
                 <div className="flex flex-row gap-5 text-xs text-secondary ml-2">
-                  <div>Time: <span className="text-white">{new Date(selectedSession.start_time).toLocaleString()} - {new Date(selectedSession.end_time).toLocaleString()}</span></div>
+                  <div>Date: <span className="text-white">{new Date(selectedSession.date).toLocaleDateString()}</span></div>
+                  <div>Time: <span className="text-white">{formatTime(selectedSession.start_time)} - {formatTime(selectedSession.end_time)}</span></div>
                   <div>Session for: <span className="text-cyan">{relatedSessionsMap.map(s => s.class_name).join(', ')}</span></div>
                 </div>
               </div>

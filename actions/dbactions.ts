@@ -21,6 +21,7 @@ export interface Student {
 export interface Session {
   id: string
   title: string
+  date: string
   start_time: string
   end_time: string
   class_name: ClassName
@@ -93,6 +94,8 @@ export async function initializeDatabase() {
 
     // Ensure notification columns exist (migration for existing databases)
     await ensureNotificationColumns()
+    // Migrate sessions schema
+    await migrateSessionsSchema()
   } catch (error) {
     console.error('Database initialization error:', error)
   }
@@ -119,6 +122,38 @@ async function ensureNotificationColumns() {
   }
 }
 
+export async function migrateSessionsSchema() {
+  try {
+    await supabase.rpc('exec_sql', {
+      sql: `
+        DO $$
+        BEGIN
+          -- Add date column if it doesn't exist
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'date') THEN
+            ALTER TABLE sessions ADD COLUMN date DATE;
+            -- Update existing records to use date from start_time
+            UPDATE sessions SET date = start_time::DATE;
+            ALTER TABLE sessions ALTER COLUMN date SET NOT NULL;
+            ALTER TABLE sessions ALTER COLUMN date SET DEFAULT CURRENT_DATE;
+          END IF;
+
+          -- Change start_time to TIME if it's not already
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'start_time' AND data_type LIKE 'timestamp%') THEN
+            ALTER TABLE sessions ALTER COLUMN start_time TYPE TIME USING start_time::TIME;
+          END IF;
+
+          -- Change end_time to TIME if it's not already
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'end_time' AND data_type LIKE 'timestamp%') THEN
+            ALTER TABLE sessions ALTER COLUMN end_time TYPE TIME USING end_time::TIME;
+          END IF;
+        END $$;
+      `
+    })
+  } catch (error) {
+    console.error('Error migrating sessions schema:', error)
+  }
+}
+
 async function createTables() {
   // Students table
   await supabase.rpc('exec_sql', {
@@ -141,8 +176,9 @@ async function createTables() {
       CREATE TABLE sessions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         title TEXT NOT NULL,
-        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
         class_name TEXT NOT NULL CHECK (class_name IN ('11A', '11B', '11C', '11D')),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -373,6 +409,7 @@ export async function getSessionsByClass(className: ClassName) {
     .from('sessions')
     .select('*')
     .eq('class_name', className)
+    .order('date', { ascending: false })
     .order('start_time', { ascending: false })
   
   if (error) throw error
@@ -400,11 +437,12 @@ export async function createSessions(sessions: Omit<Session, 'id' | 'created_at'
   return data
 }
 
-export async function getRelatedSessions(title: string, startTime: string, endTime: string) {
+export async function getRelatedSessions(title: string, date: string, startTime: string, endTime: string) {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
     .eq('title', title)
+    .eq('date', date)
     .eq('start_time', startTime)
     .eq('end_time', endTime)
   
