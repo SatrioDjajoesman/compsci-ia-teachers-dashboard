@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/appStore'
 import { 
   getTasksByClass, 
   createTasks, 
+  deleteTask,
   getTaskSubmissionsByTask, 
   updateTaskSubmissionStatus,
   updateMultipleTaskSubmissionStatus,
@@ -33,12 +34,22 @@ export default function TasksSection() {
   const [dueDate, setDueDate] = useState('')
   const [selectedClasses, setSelectedClasses] = useState<ClassName[]>([])
 
+  // Sorting and Search state
+  const [sortOption, setSortOption] = useState<'date' | 'name'>('date')
+  const [searchQuery, setSearchQuery] = useState('')
+
   // Reset allowed classes on unmount
   useEffect(() => {
     return () => {
       setAllowedClasses(null)
     }
   }, [setAllowedClasses])
+
+  const [studentSearchQuery, setStudentSearchQuery] = useState('')
+
+  const filteredStudents = students.filter(student => 
+    student.name.toLowerCase().includes(studentSearchQuery.toLowerCase())
+  )
 
   useEffect(() => {
     loadTasks()
@@ -153,6 +164,21 @@ export default function TasksSection() {
     }
   }
 
+  const handleDeleteTask = async () => {
+    if (!selectedTask) return
+    
+    if (confirm(`Are you sure you want to delete task "${selectedTask.title}"? This cannot be undone.`)) {
+      try {
+        await deleteTask(selectedTask.id)
+        toast.success('Task deleted successfully')
+        setSelectedTask(null)
+        loadTasks()
+      } catch (error) {
+        toast.error('Failed to delete task')
+      }
+    }
+  }
+
   const handleTaskSubmissionUpdate = async (studentId: string, status: TaskStatus) => {
     if (!selectedTask) return
     
@@ -247,6 +273,18 @@ export default function TasksSection() {
     )
   }
 
+  const filteredTasks = tasks
+    .filter(task => task.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (sortOption === 'date') {
+        // Sort by due date ascending (earliest first)
+        return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+      } else {
+        // Sort by name ascending
+        return a.title.localeCompare(b.title)
+      }
+    })
+
   return (
     <div className="terminal-container h-full">
       <div className="terminal-section-header">
@@ -257,7 +295,26 @@ export default function TasksSection() {
         {!selectedTask ? (
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-orange">Tasks</h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-orange">Tasks</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={sortOption}
+                    onChange={(e) => setSortOption(e.target.value as 'date' | 'name')}
+                    className="terminal-input text-xs py-1 h-8"
+                  >
+                    <option value="date">Date</option>
+                    <option value="name">Name</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="terminal-input text-xs py-1 h-8 w-32 focus:w-48 transition-all"
+                  />
+                </div>
+              </div>
               <button 
                 onClick={() => setShowCreateModal(true)}
                 className="terminal-button"
@@ -331,7 +388,7 @@ export default function TasksSection() {
             </Modal>
 
             <div className="terminal-grid">
-              {tasks.map((task) => (
+              {filteredTasks.map((task) => (
                 <div 
                   key={task.id}
                   className="terminal-grid-item cursor-pointer hover:bg-gray-900"
@@ -357,12 +414,21 @@ export default function TasksSection() {
                   <div>Assigned to: <span className="text-cyan">{relatedTasksMap.map(t => t.class_name).join(', ')}</span></div>
                 </div>
               </div>
-              <button 
-                onClick={handleBack}
-                className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
-              >
-                ← Back to Tasks
-              </button>
+              <div className="flex items-center gap-4">
+                <input
+                  type="text"
+                  placeholder="Search students..."
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  className="terminal-input text-xs py-1 h-8 w-32 focus:w-48 transition-all"
+                />
+                <button 
+                  onClick={handleBack}
+                  className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
+                >
+                  ← Back to Tasks
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto" onContextMenu={handleRightClick}>
@@ -376,7 +442,7 @@ export default function TasksSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((student) => {
+                  {filteredStudents.map((student) => {
                     const status = getTaskSubmissionStatus(student.id)
                     const notificationStatus = getNotificationStatus(student.id)
                     const isSelected = selectedStudents.includes(student.id)
@@ -418,7 +484,15 @@ export default function TasksSection() {
             </div>
 
             <div className="mt-4 text-secondary text-xs flex justify-between items-center">
-              <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              <div className="flex gap-4 items-center">
+                <button 
+                  onClick={handleDeleteTask}
+                  className="hover:cursor-pointer border py-1 px-2 bg-red-500/20 text-red-500 border-red-500/20 hover:text-red-400 w-fit text-xs"
+                >
+                  Delete Task
+                </button>
+                <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              </div>
               {selectedStudents.length > 0 && (
                 <div>
                   {selectedStudents.length} students selected (Right-click for bulk actions)

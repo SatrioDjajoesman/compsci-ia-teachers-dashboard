@@ -437,6 +437,15 @@ export async function createSessions(sessions: Omit<Session, 'id' | 'created_at'
   return data
 }
 
+export async function deleteSession(sessionId: string) {
+  const { error } = await supabase
+    .from('sessions')
+    .delete()
+    .eq('id', sessionId)
+  
+  if (error) throw error
+}
+
 export async function getRelatedSessions(title: string, date: string, startTime: string, endTime: string) {
   const { data, error } = await supabase
     .from('sessions')
@@ -492,6 +501,15 @@ export async function createTasks(tasks: Omit<Task, 'id' | 'created_at'>[]) {
   
   if (error) throw error
   return data
+}
+
+export async function deleteTask(taskId: string) {
+  const { error } = await supabase
+    .from('tasks')
+    .delete()
+    .eq('id', taskId)
+  
+  if (error) throw error
 }
 
 export async function getRelatedTasks(title: string) {

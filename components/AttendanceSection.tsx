@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/appStore'
 import { 
   getSessionsByClass, 
   createSessions, 
+  deleteSession,
   getAttendanceBySession, 
   updateAttendanceStatus,
   updateMultipleAttendanceStatus,
@@ -34,6 +35,10 @@ export default function AttendanceSection() {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [selectedClasses, setSelectedClasses] = useState<ClassName[]>([])
+  
+  // Sorting and Search state
+  const [sortOption, setSortOption] = useState<'date' | 'name'>('date')
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Reset allowed classes on unmount
   useEffect(() => {
@@ -41,6 +46,12 @@ export default function AttendanceSection() {
       setAllowedClasses(null)
     }
   }, [setAllowedClasses])
+
+  const [studentSearchQuery, setStudentSearchQuery] = useState('')
+
+  const filteredStudents = students.filter(student => 
+    student.name.toLowerCase().includes(studentSearchQuery.toLowerCase())
+  )
 
   useEffect(() => {
     loadSessions()
@@ -166,6 +177,21 @@ export default function AttendanceSection() {
     }
   }
 
+  const handleDeleteSession = async () => {
+    if (!selectedSession) return
+    
+    if (confirm(`Are you sure you want to delete session "${selectedSession.title}"? This cannot be undone.`)) {
+      try {
+        await deleteSession(selectedSession.id)
+        toast.success('Session deleted successfully')
+        setSelectedSession(null)
+        loadSessions()
+      } catch (error) {
+        toast.error('Failed to delete session')
+      }
+    }
+  }
+
   const handleAttendanceUpdate = async (studentId: string, status: AttendanceStatus) => {
     if (!selectedSession) return
     
@@ -267,6 +293,18 @@ export default function AttendanceSection() {
     return time.split(':').slice(0, 2).join(':')
   }
 
+  const filteredSessions = sessions
+    .filter(session => session.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (sortOption === 'date') {
+        // Sort by date descending (newest first)
+        return new Date(b.date).getTime() - new Date(a.date).getTime()
+      } else {
+        // Sort by name ascending
+        return a.title.localeCompare(b.title)
+      }
+    })
+
   return (
     <div className="terminal-container h-full">
       <div className="terminal-section-header">
@@ -277,7 +315,26 @@ export default function AttendanceSection() {
         {!selectedSession ? (
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-orange">Sessions</h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-orange">Sessions</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={sortOption}
+                    onChange={(e) => setSortOption(e.target.value as 'date' | 'name')}
+                    className="terminal-input text-xs py-1 h-8"
+                  >
+                    <option value="date">Date</option>
+                    <option value="name">Name</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="terminal-input text-xs py-1 h-8 w-32 focus:w-48 transition-all"
+                  />
+                </div>
+              </div>
               <button 
                 onClick={() => setShowCreateModal(true)}
                 className="terminal-button"
@@ -375,7 +432,7 @@ export default function AttendanceSection() {
             </Modal>
 
             <div className="terminal-grid">
-              {sessions.map((session) => (
+              {filteredSessions.map((session) => (
                 <div 
                   key={session.id}
                   className="terminal-grid-item cursor-pointer hover:bg-gray-900"
@@ -402,12 +459,21 @@ export default function AttendanceSection() {
                   <div>Session for: <span className="text-cyan">{relatedSessionsMap.map(s => s.class_name).join(', ')}</span></div>
                 </div>
               </div>
-              <button 
-                onClick={handleBack}
-                className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
-              >
-                ← Back to Sessions
-              </button>
+              <div className="flex items-center gap-4">
+                <input
+                  type="text"
+                  placeholder="Search students..."
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  className="terminal-input text-xs py-1 h-8 w-32 focus:w-48 transition-all"
+                />
+                <button 
+                  onClick={handleBack}
+                  className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
+                >
+                  ← Back to Sessions
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto" onContextMenu={handleRightClick}>
@@ -421,7 +487,7 @@ export default function AttendanceSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((student) => {
+                  {filteredStudents.map((student) => {
                     const status = getAttendanceStatus(student.id)
                     const notificationStatus = getNotificationStatus(student.id)
                     const isSelected = selectedStudents.includes(student.id)
@@ -452,9 +518,9 @@ export default function AttendanceSection() {
                           </select>
                         </td>
                         <td className="text-xs text-secondary">
-                          {notificationStatus === 'sent' && <span className="text-green-500">SENT</span>}
-                          {notificationStatus === 'dismissed' && <span className="text-gray-500">DISMISSED</span>}
-                          {notificationStatus === 'pending' && <span className="text-orange">PENDING</span>}
+                          {notificationStatus === 'sent' && <span className="text-white">Email Sent</span>}
+                          {notificationStatus === 'dismissed' && <span className="text-zinc-500">Dismissed</span>}
+                          {notificationStatus === 'pending' && <span className="text-orange">Pending Email</span>}
                           {!notificationStatus && '-'}
                         </td>
                       </tr>
@@ -465,7 +531,15 @@ export default function AttendanceSection() {
             </div>
 
             <div className="mt-4 text-secondary text-xs flex justify-between items-center">
-              <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              <div className="flex gap-4 items-center">
+                <button 
+                  onClick={handleDeleteSession}
+                  className="hover:cursor-pointer border py-1 px-2 bg-red-500/20 text-red-500 border-red-500/20 hover:text-red-400 w-fit text-xs"
+                >
+                  Delete Session
+                </button>
+                <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              </div>
               {selectedStudents.length > 0 && (
                 <div>
                   {selectedStudents.length} students selected (Right-click for bulk actions)

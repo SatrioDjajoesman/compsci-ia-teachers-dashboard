@@ -43,6 +43,9 @@ export default function StudentsSection() {
   const [parentName, setParentName] = useState('')
   const [parentEmail, setParentEmail] = useState('')
   const [parentPhone, setParentPhone] = useState('')
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     loadStudents()
@@ -121,6 +124,12 @@ export default function StudentsSection() {
     }
   }
 
+  const filteredStudents = students.filter(student => 
+    student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    student.parent_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    student.parent_email.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   return (
     <div className="terminal-container h-full">
       <div className="terminal-section-header">
@@ -131,7 +140,16 @@ export default function StudentsSection() {
         {!selectedStudent ? (
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-orange">All Students</h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-orange">All Students</h3>
+                <input
+                  type="text"
+                  placeholder="Search students..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="terminal-input text-xs py-1 h-8 w-32 focus:w-48 transition-all"
+                />
+              </div>
               <button 
                 onClick={() => setShowCreateModal(true)}
                 className="terminal-button"
@@ -213,7 +231,7 @@ export default function StudentsSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((student) => (
+                  {filteredStudents.map((student) => (
                     <tr 
                       key={student.id}
                       className="cursor-pointer hover:bg-gray-900"
