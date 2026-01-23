@@ -4,32 +4,53 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { 
   getTasksByClass, 
-  createTask, 
+  createTasks, 
   getTaskSubmissionsByTask, 
   updateTaskSubmissionStatus,
   updateMultipleTaskSubmissionStatus,
   getStudentsByClass,
+  getRelatedTasks,
   Task,
   Student,
-  TaskStatus 
+  TaskStatus,
+  AVAILABLE_CLASSES,
+  ClassName
 } from '@/actions/dbactions'
 import toast from 'react-hot-toast'
+import Modal from './Modal'
 
 export default function TasksSection() {
-  const { currentClass, students, selectedStudents, setStudents, selectMultipleStudents, clearStudentSelection } = useAppStore()
+  const { currentClass, students, selectedStudents, setStudents, selectMultipleStudents, clearStudentSelection, setAllowedClasses } = useAppStore()
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [relatedTasksMap, setRelatedTasksMap] = useState<Task[]>([])
   const [taskSubmissions, setTaskSubmissions] = useState<any[]>([])
-  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [loading, setLoading] = useState(false)
 
   // Form state
   const [taskTitle, setTaskTitle] = useState('')
   const [dueDate, setDueDate] = useState('')
+  const [selectedClasses, setSelectedClasses] = useState<ClassName[]>([])
+
+  // Reset allowed classes on unmount
+  useEffect(() => {
+    return () => {
+      setAllowedClasses(null)
+    }
+  }, [setAllowedClasses])
 
   useEffect(() => {
     loadTasks()
     loadStudents()
+    
+    // Switch selected task if we have related tasks mapped
+    if (relatedTasksMap.length > 0) {
+      const newTask = relatedTasksMap.find(t => t.class_name === currentClass)
+      if (newTask && newTask.id !== selectedTask?.id) {
+        setSelectedTask(newTask)
+      }
+    }
   }, [currentClass])
 
   useEffect(() => {
@@ -37,6 +58,33 @@ export default function TasksSection() {
       loadTaskSubmissions()
     }
   }, [selectedTask])
+
+  // Set default selected class when modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      setSelectedClasses([currentClass])
+    }
+  }, [showCreateModal, currentClass])
+
+  const handleTaskSelect = async (task: Task) => {
+    try {
+      setLoading(true)
+      const related = await getRelatedTasks(task.title)
+      setRelatedTasksMap(related)
+      setAllowedClasses(related.map((t: Task) => t.class_name))
+      setSelectedTask(task)
+    } catch (error) {
+      toast.error('Failed to load task details')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBack = () => {
+    setSelectedTask(null)
+    setRelatedTasksMap([])
+    setAllowedClasses(null)
+  }
 
   const loadTasks = async () => {
     try {
@@ -76,25 +124,43 @@ export default function TasksSection() {
       return
     }
 
+    if (selectedClasses.length === 0) {
+      toast.error('Please select at least one class')
+      return
+    }
+
     try {
-      await createTask({
+      const newTasks = selectedClasses.map(className => ({
         title: taskTitle,
         due_date: dueDate,
-        class_name: currentClass
-      })
+        class_name: className
+      }))
+
+      await createTasks(newTasks)
       
-      toast.success(`Created task: ${taskTitle} for ${currentClass}`)
-      setShowCreateForm(false)
+      toast.success(`Created task: ${taskTitle} for ${selectedClasses.join(', ')}`)
+      setShowCreateModal(false)
       setTaskTitle('')
       setDueDate('')
-      loadTasks()
+      setSelectedClasses([])
+      
+      // Reload tasks if the current class was one of the selected classes
+      if (selectedClasses.includes(currentClass)) {
+        loadTasks()
+      }
     } catch (error) {
-      toast.error('Failed to create task')
+      toast.error('Failed to create tasks')
     }
   }
 
   const handleTaskSubmissionUpdate = async (studentId: string, status: TaskStatus) => {
     if (!selectedTask) return
+    
+    // If the student is selected, update all selected students
+    if (selectedStudents.includes(studentId)) {
+      handleMultipleTaskSubmissionUpdate(status)
+      return
+    }
     
     try {
       await updateTaskSubmissionStatus(studentId, selectedTask.id, status)
@@ -135,7 +201,7 @@ export default function TasksSection() {
       const rangeIds = students.slice(start, end + 1).map(s => s.id)
       selectMultipleStudents([...new Set([...selectedStudents, ...rangeIds])])
     } else {
-      // Single selection
+      // Single selection enabled
       selectMultipleStudents([studentId])
     }
   }
@@ -158,6 +224,11 @@ export default function TasksSection() {
     return record?.status || 'Awaiting submission'
   }
 
+  const getNotificationStatus = (studentId: string): 'pending' | 'sent' | 'dismissed' | undefined => {
+    const record = taskSubmissions.find(r => r.student_id === studentId)
+    return record?.notification_status
+  }
+
   const getStatusColor = (status: TaskStatus): string => {
     switch (status) {
       case 'Submitted': return 'status-submitted'
@@ -166,6 +237,14 @@ export default function TasksSection() {
       case 'Non Submission': return 'status-non-submission'
       default: return 'status-awaiting'
     }
+  }
+
+  const toggleClassSelection = (className: ClassName) => {
+    setSelectedClasses(prev => 
+      prev.includes(className)
+        ? prev.filter(c => c !== className)
+        : [...prev, className]
+    )
   }
 
   return (
@@ -177,62 +256,86 @@ export default function TasksSection() {
       <div className="terminal-content">
         {!selectedTask ? (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center mb-2">
               <h3 className="text-orange">Tasks</h3>
               <button 
-                onClick={() => setShowCreateForm(true)}
+                onClick={() => setShowCreateModal(true)}
                 className="terminal-button"
               >
                 Create Task
               </button>
             </div>
 
-            {showCreateForm && (
-              <div className="mb-4 p-4 border border-border-color">
-                <h4 className="text-orange mb-2">Create New Task</h4>
-                <form onSubmit={handleCreateTask} className="space-y-2">
-                  <div>
-                    <label className="block text-secondary mb-1">Task Title *</label>
-                    <input
-                      type="text"
-                      value={taskTitle}
-                      onChange={(e) => setTaskTitle(e.target.value)}
-                      className="terminal-input w-full"
-                      required
-                    />
+            <Modal
+              isOpen={showCreateModal}
+              onClose={() => setShowCreateModal(false)}
+              title="Create New Task"
+            >
+              <form onSubmit={handleCreateTask} className="space-y-4">
+                <div>
+                  <label className="block text-secondary mb-1">Task Title *</label>
+                  <input
+                    type="text"
+                    value={taskTitle}
+                    onChange={(e) => setTaskTitle(e.target.value)}
+                    className="terminal-input w-full"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-secondary mb-1">Due Date *</label>
+                  <input
+                    type="datetime-local"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="terminal-input w-full"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-secondary mb-2">Assign to Classes *</label>
+                  <div className="flex flex-wrap gap-4">
+                    {AVAILABLE_CLASSES.map((className) => (
+                      <label 
+                        key={className}
+                        className="flex items-center space-x-2 cursor-pointer text-secondary hover:text-white"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedClasses.includes(className)}
+                          onChange={() => toggleClassSelection(className)}
+                          className="cursor-pointer"
+                        />
+                        <span className={selectedClasses.includes(className) ? 'text-cyan' : ''}>
+                          {className}
+                        </span>
+                      </label>
+                    ))}
                   </div>
-                  <div>
-                    <label className="block text-secondary mb-1">Due Date *</label>
-                    <input
-                      type="datetime-local"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="terminal-input w-full"
-                      required
-                    />
-                  </div>
-                  <div className="flex space-x-2">
-                    <button type="submit" className="terminal-button">
-                      Create
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => setShowCreateForm(false)}
-                      className="terminal-button"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-4 border-t border-border-color">
+                  <button 
+                    type="button" 
+                    onClick={() => setShowCreateModal(false)}
+                    className="terminal-button"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="terminal-button text-cyan border-cyan">
+                    Create Task
+                  </button>
+                </div>
+              </form>
+            </Modal>
 
             <div className="terminal-grid">
               {tasks.map((task) => (
                 <div 
                   key={task.id}
                   className="terminal-grid-item cursor-pointer hover:bg-gray-900"
-                  onClick={() => setSelectedTask(task)}
+                  onClick={() => handleTaskSelect(task)}
                 >
                   <div className="font-bold text-cyan">{task.title}</div>
                   <div className="text-secondary text-xs">
@@ -244,21 +347,22 @@ export default function TasksSection() {
           </div>
         ) : (
           <div>
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <button 
-                  onClick={() => setSelectedTask(null)}
-                  className="terminal-button mr-2"
-                >
-                  ← Back to Tasks
-                </button>
-                <span className="text-orange font-bold">{selectedTask.title}</span>
-              </div>
-              {selectedStudents.length > 0 && (
-                <div className="text-secondary">
-                  {selectedStudents.length} students selected (Right-click for bulk actions)
+            <div className="flex justify-between items-start mb-0">
+              <div className='flex flex-row gap-2 items-center'>
+                <div className="ml-2 flex items-center gap-2">
+                  <span className="text-orange font-bold text-lg">{selectedTask.title}</span>
                 </div>
-              )}
+                <div className="flex flex-row gap-5 text-xs text-secondary ml-2">
+                  <div>Due: <span className="text-white">{new Date(selectedTask.due_date).toLocaleString()}</span></div>
+                  <div>Assigned to: <span className="text-cyan">{relatedTasksMap.map(t => t.class_name).join(', ')}</span></div>
+                </div>
+              </div>
+              <button 
+                onClick={handleBack}
+                className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
+              >
+                ← Back to Tasks
+              </button>
             </div>
 
             <div className="overflow-x-auto" onContextMenu={handleRightClick}>
@@ -267,18 +371,20 @@ export default function TasksSection() {
                   <tr>
                     <th>Student Name</th>
                     <th>Status</th>
+                    <th>Notification</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((student) => {
                     const status = getTaskSubmissionStatus(student.id)
+                    const notificationStatus = getNotificationStatus(student.id)
                     const isSelected = selectedStudents.includes(student.id)
                     
                     return (
                       <tr 
                         key={student.id}
-                        className={`cursor-pointer ${isSelected ? 'bg-gray-800' : ''}`}
+                        className={`terminal-row cursor-pointer ${isSelected ? 'selected' : ''}`}
                         onClick={(e) => handleStudentClick(student.id, e)}
                       >
                         <td>{student.name}</td>
@@ -298,6 +404,12 @@ export default function TasksSection() {
                             <option value="Non Submission">Non Submission</option>
                           </select>
                         </td>
+                        <td className="text-xs text-secondary">
+                          {notificationStatus === 'sent' && <span className="text-white">Email Sent</span>}
+                          {notificationStatus === 'dismissed' && <span className="text-zinc-500">Dismissed</span>}
+                          {notificationStatus === 'pending' && <span className="text-orange">Pending Email</span>}
+                          {!notificationStatus && '-'}
+                        </td>
                       </tr>
                     )
                   })}
@@ -305,8 +417,13 @@ export default function TasksSection() {
               </table>
             </div>
 
-            <div className="mt-4 text-secondary text-xs">
-              Click to select, Ctrl+Click to toggle, Shift+Click for range selection
+            <div className="mt-4 text-secondary text-xs flex justify-between items-center">
+              <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              {selectedStudents.length > 0 && (
+                <div>
+                  {selectedStudents.length} students selected (Right-click for bulk actions)
+                </div>
+              )}
             </div>
           </div>
         )}

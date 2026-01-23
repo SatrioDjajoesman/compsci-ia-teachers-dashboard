@@ -29,11 +29,6 @@
   --border-color: var(--border-color);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
 
 html, body {
   height: 100%;
@@ -90,6 +85,18 @@ body {
 
 .terminal-table tr:hover {
   background: #111111;
+}
+
+.terminal-row {
+  user-select: none;
+}
+
+.terminal-row.selected {
+  background: rgba(255, 102, 0, 0.3) !important;
+}
+
+.terminal-row.selected:hover {
+  background: rgba(255, 102, 0, 0.4) !important;
 }
 
 /* Status Colors */
@@ -150,7 +157,10 @@ body {
   border: 1px solid transparent;
 }
 
-.terminal-nav-item:hover,
+.terminal-nav-item:hover {
+  color: var(--color-orange);
+}
+
 .terminal-nav-item.active {
   color: var(--color-orange);
   border-color: var(--color-orange);

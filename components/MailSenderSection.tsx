@@ -6,18 +6,23 @@ import {
   getStudentsByClass,
   getEmailTemplates,
   updateEmailTemplate,
-  sendEmail,
+  sendEmail as logEmailToDb,
+  logManualEmail,
   getSentEmails,
   getSessionsByClass,
   getTasksByClass,
   getAttendanceBySession,
   getTaskSubmissionsByTask,
+  updateAttendanceNotificationStatus,
+  updateTaskSubmissionNotificationStatus,
   Student,
   EmailTemplate,
   Session,
   Task
 } from '@/actions/dbactions'
+import { sendEmailViaResend } from '@/actions/sendEmail'
 import toast from 'react-hot-toast'
+import { Loader } from 'lucide-react'
 
 interface Violation {
   id: string
@@ -25,6 +30,7 @@ interface Violation {
   type: 'Late attendance' | 'Absent attendance' | 'Truant attendance' | 'Late task submission' | 'Non Submission'
   sessionOrTaskName: string
   sessionOrTaskId: string
+  notificationStatus?: 'pending' | 'sent' | 'dismissed'
 }
 
 export default function MailSenderSection() {
@@ -40,6 +46,9 @@ export default function MailSenderSection() {
   const [showManualEmail, setShowManualEmail] = useState(false)
   const [showEmailHistory, setShowEmailHistory] = useState(false)
   const [selectedEmail, setSelectedEmail] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [processingViolations, setProcessingViolations] = useState<Set<string>>(new Set())
+  const [isSendingAll, setIsSendingAll] = useState(false)
 
   // Manual email form
   const [manualRecipient, setManualRecipient] = useState('')
@@ -47,6 +56,8 @@ export default function MailSenderSection() {
   const [manualBody, setManualBody] = useState('')
 
   useEffect(() => {
+    setLoading(true)
+    setViolations([])
     loadData()
   }, [currentClass])
 
@@ -70,6 +81,8 @@ export default function MailSenderSection() {
       await detectViolations(studentsData, sessionsData, tasksData)
     } catch (error) {
       toast.error('Failed to load data')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -81,6 +94,9 @@ export default function MailSenderSection() {
       const attendanceRecords = await getAttendanceBySession(session.id)
       
       for (const record of attendanceRecords) {
+        // Skip if already sent or dismissed
+        if (record.notification_status === 'sent' || record.notification_status === 'dismissed') continue
+
         const student = students.find(s => s.id === record.student_id)
         if (!student) continue
 
@@ -117,6 +133,9 @@ export default function MailSenderSection() {
       const submissions = await getTaskSubmissionsByTask(task.id)
       
       for (const submission of submissions) {
+        // Skip if already sent or dismissed
+        if (submission.notification_status === 'sent' || submission.notification_status === 'dismissed') continue
+
         const student = students.find(s => s.id === submission.student_id)
         if (!student) continue
 
@@ -144,9 +163,28 @@ export default function MailSenderSection() {
   }
 
   const handleSendEmail = async (violation: Violation) => {
+    setProcessingViolations(prev => new Set(prev).add(violation.id))
     try {
-      await sendEmail(violation.student.id, violation.type, violation.sessionOrTaskName)
-      toast.success(`Email sent to ${violation.student.name}'s parent: ${violation.type}`)
+      const loggedEmail = await logEmailToDb(violation.student.id, violation.type, violation.sessionOrTaskName)
+      
+      const result = await sendEmailViaResend({
+        to: loggedEmail.recipient_email,
+        subject: loggedEmail.subject,
+        content: loggedEmail.body
+      })
+
+      if (!result.success) {
+        toast.error('Logged to DB but failed to send email via Resend')
+      } else {
+        toast.success(`Email sent to ${violation.student.name}'s parent: ${violation.type}`)
+      }
+      
+      // Update status
+      if (violation.id.startsWith('att-')) {
+        await updateAttendanceNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'sent')
+      } else {
+        await updateTaskSubmissionNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'sent')
+      }
       
       // Remove violation from list
       setViolations(prev => prev.filter(v => v.id !== violation.id))
@@ -156,15 +194,53 @@ export default function MailSenderSection() {
       setSentEmails(emails)
     } catch (error) {
       toast.error('Failed to send email')
+    } finally {
+      setProcessingViolations(prev => {
+        const next = new Set(prev)
+        next.delete(violation.id)
+        return next
+      })
+    }
+  }
+
+  const handleDismiss = async (violation: Violation) => {
+    try {
+      if (violation.id.startsWith('att-')) {
+        await updateAttendanceNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'dismissed')
+      } else {
+        await updateTaskSubmissionNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'dismissed')
+      }
+      
+      toast.success(`Dismissed violation for ${violation.student.name}`)
+      setViolations(prev => prev.filter(v => v.id !== violation.id))
+    } catch (error) {
+      toast.error('Failed to dismiss violation')
     }
   }
 
   const handleSendAllEmails = async () => {
+    setIsSendingAll(true)
     try {
+      let successCount = 0
       for (const violation of violations) {
-        await sendEmail(violation.student.id, violation.type, violation.sessionOrTaskName)
+        const loggedEmail = await logEmailToDb(violation.student.id, violation.type, violation.sessionOrTaskName)
+        
+        const result = await sendEmailViaResend({
+          to: loggedEmail.recipient_email,
+          subject: loggedEmail.subject,
+          content: loggedEmail.body
+        })
+        
+        if (result.success) successCount++
+
+        // Update status
+        if (violation.id.startsWith('att-')) {
+          await updateAttendanceNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'sent')
+        } else {
+          await updateTaskSubmissionNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'sent')
+        }
       }
-      toast.success(`Sent ${violations.length} emails`)
+      toast.success(`Sent ${successCount} emails`)
       setViolations([])
       
       // Refresh sent emails
@@ -172,6 +248,24 @@ export default function MailSenderSection() {
       setSentEmails(emails)
     } catch (error) {
       toast.error('Failed to send emails')
+    } finally {
+      setIsSendingAll(false)
+    }
+  }
+
+  const handleDismissAll = async () => {
+    try {
+      for (const violation of violations) {
+        if (violation.id.startsWith('att-')) {
+          await updateAttendanceNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'dismissed')
+        } else {
+          await updateTaskSubmissionNotificationStatus(violation.student.id, violation.sessionOrTaskId, 'dismissed')
+        }
+      }
+      toast.success(`Dismissed ${violations.length} violations`)
+      setViolations([])
+    } catch (error) {
+      toast.error('Failed to dismiss violations')
     }
   }
 
@@ -195,18 +289,26 @@ export default function MailSenderSection() {
     }
 
     try {
-      // Create a manual email record (simulated)
-      const manualEmail = {
-        student_id: 'manual',
-        recipient_email: manualRecipient,
-        subject: manualSubject,
-        body: manualBody,
-        violation_type: 'Manual'
-      }
+      // Create a manual email record
+      const loggedEmail = await logManualEmail(
+        null, 
+        manualRecipient,
+        manualSubject,
+        manualBody
+      )
 
-      // In a real app, you'd have a separate endpoint for manual emails
-      // For now, we'll just show a success message
-      toast.success(`Manual email sent to ${manualRecipient}`)
+      // Send via Resend
+      const result = await sendEmailViaResend({
+        to: manualRecipient,
+        subject: manualSubject,
+        content: manualBody
+      })
+
+      if (!result.success) {
+        toast.error('Logged to DB but failed to send email via Resend')
+      } else {
+        toast.success(`Manual email sent to ${manualRecipient}`)
+      }
       
       // Reset form
       setManualRecipient('')
@@ -240,37 +342,79 @@ export default function MailSenderSection() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-orange">Pending Violations ({violations.length})</h3>
             {violations.length > 0 && (
-              <button onClick={handleSendAllEmails} className="terminal-button">
-                Confirm Send All
-              </button>
+              <div className="flex gap-2">
+                <button onClick={handleDismissAll} className="terminal-button border-red-500 text-red-500 hover:text-red-400">
+                  Dismiss All
+                </button>
+                <button 
+                  onClick={handleSendAllEmails} 
+                  className="terminal-button flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                  disabled={isSendingAll}
+                >
+                  {isSendingAll ? (
+                    <>
+                      Processing <Loader className="w-4 h-4 animate-spin" />
+                    </>
+                  ) : (
+                    'Confirm Send All'
+                  )}
+                </button>
+              </div>
             )}
           </div>
           
-          <div className="terminal-grid">
-            {violations.map((violation) => (
-              <div key={violation.id} className="terminal-grid-item flex justify-between items-center">
-                <div>
-                  <span className="font-bold text-cyan">{violation.student.name}</span>
-                  <span className="text-secondary"> - {violation.type} for {violation.sessionOrTaskName}</span>
-                </div>
-                <button
-                  onClick={() => handleSendEmail(violation)}
-                  className="terminal-button text-xs"
-                >
-                  Confirm Send
-                </button>
+          <div className="border border-white/20 min-h-[200px] bg-black flex flex-col">
+            {loading ? (
+              <div className="flex flex-1 gap-2 items-center justify-center text-secondary p-4 italic">
+                Loading violations <Loader className='w-3 h-3 animate-spin'/>
               </div>
-            ))}
+            ) : violations.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-secondary p-4 italic">
+                No pending violations
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[1px] bg-border-color">
+                {violations.map((violation) => (
+                  <div key={violation.id} className="bg-black p-2 flex justify-between items-center">
+                    <div>
+                      <span className="font-bold text-cyan">{violation.student.name}</span>
+                      <span className="text-secondary"> - {violation.type} for {violation.sessionOrTaskName}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleDismiss(violation)}
+                        className="terminal-button text-xs border-red-500 text-red-500 hover:text-red-400"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => handleSendEmail(violation)}
+                        className="terminal-button text-xs flex items-center gap-1 disabled:opacity-50 disabled:pointer-events-none"
+                        disabled={processingViolations.has(violation.id) || isSendingAll}
+                      >
+                        {processingViolations.has(violation.id) ? (
+                          <>
+                            Processing <Loader className="w-3 h-3 animate-spin" />
+                          </>
+                        ) : (
+                          'Confirm Send'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Email Templates Section */}
         <div className="mb-6">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-orange">Email Templates</h3>
+            <h3 className="text-orange w-full pb-2 border-b border-orange-500/50">Email Templates</h3>
             <button 
               onClick={() => setShowTemplateEditor(!showTemplateEditor)}
-              className="terminal-button"
+              className="terminal-button w-[25%]"
             >
               {showTemplateEditor ? 'Hide Editor' : 'Edit Templates'}
             </button>
@@ -279,7 +423,7 @@ export default function MailSenderSection() {
           {showTemplateEditor && (
             <div className="mb-4 space-y-4">
               {emailTemplates.map((template) => (
-                <div key={template.id} className="p-4 border border-border-color">
+                <div key={template.id} className="p-4 border-b border-orange-500/50">
                   <h4 className="text-orange mb-2">{template.violation_type}</h4>
                   <div className="space-y-2">
                     <div>
@@ -325,17 +469,17 @@ export default function MailSenderSection() {
         {/* Manual Email Section */}
         <div className="mb-6">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-orange">Manual Email</h3>
+            <h3 className="text-orange w-full pb-2 border-b border-orange-500/50">Manual Email</h3>
             <button 
               onClick={() => setShowManualEmail(!showManualEmail)}
-              className="terminal-button"
+              className="terminal-button w-[25%]"
             >
               {showManualEmail ? 'Hide Composer' : 'Compose Email'}
             </button>
           </div>
 
           {showManualEmail && (
-            <div className="p-4 border border-border-color">
+            <div className="p-4 border-b border-orange-500/50">
               <div className="space-y-4">
                 <div>
                   <label className="block text-secondary mb-1">Template</label>

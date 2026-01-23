@@ -12,20 +12,20 @@ export default function ToastProvider() {
           color: '#ffffff',
           border: '1px solid rgba(255, 255, 255, 0.2)',
           borderRadius: '0',
-          fontFamily: 'Courier New, monospace',
+          fontFamily: 'Helvetica, Sans-serif',
           fontSize: '12px',
           padding: '8px 12px',
         },
         success: {
           style: {
             color: '#00ff00',
-            borderColor: '#00ff00',
+            borderColor: '#313131ff',
           },
         },
         error: {
           style: {
             color: '#ff0000',
-            borderColor: '#ff0000',
+            borderColor: '#313131ff',
           },
         },
         duration: 3000,

@@ -4,40 +4,87 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { 
   getSessionsByClass, 
-  createSession, 
+  createSessions, 
   getAttendanceBySession, 
   updateAttendanceStatus,
   updateMultipleAttendanceStatus,
   getStudentsByClass,
+  getRelatedSessions,
   Session,
   Student,
-  AttendanceStatus 
+  AttendanceStatus,
+  AVAILABLE_CLASSES,
+  ClassName
 } from '../actions/dbactions'
 import toast from 'react-hot-toast'
+import Modal from './Modal'
 
 export default function AttendanceSection() {
-  const { currentClass, students, selectedStudents, setStudents, selectMultipleStudents, clearStudentSelection } = useAppStore()
+  const { currentClass, students, selectedStudents, setStudents, selectMultipleStudents, clearStudentSelection, setAllowedClasses } = useAppStore()
   const [sessions, setSessions] = useState<Session[]>([])
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+  const [relatedSessionsMap, setRelatedSessionsMap] = useState<Session[]>([])
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([])
-  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [loading, setLoading] = useState(false)
 
   // Form state
   const [sessionTitle, setSessionTitle] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
+  const [selectedClasses, setSelectedClasses] = useState<ClassName[]>([])
+
+  // Reset allowed classes on unmount
+  useEffect(() => {
+    return () => {
+      setAllowedClasses(null)
+    }
+  }, [setAllowedClasses])
 
   useEffect(() => {
     loadSessions()
     loadStudents()
+
+    if (relatedSessionsMap.length > 0) {
+      const newSession = relatedSessionsMap.find(s => s.class_name === currentClass)
+      if (newSession && newSession.id !== selectedSession?.id) {
+        setSelectedSession(newSession)
+      }
+    }
   }, [currentClass])
+
+  const handleSessionSelect = async (session: Session) => {
+    try {
+      setLoading(true)
+      const related = await getRelatedSessions(session.title, session.start_time, session.end_time)
+      setRelatedSessionsMap(related)
+      setAllowedClasses(related.map((s: Session) => s.class_name))
+      setSelectedSession(session)
+    } catch (error) {
+      toast.error('Failed to load session details')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBack = () => {
+    setSelectedSession(null)
+    setRelatedSessionsMap([])
+    setAllowedClasses(null)
+  }
 
   useEffect(() => {
     if (selectedSession) {
       loadAttendanceRecords()
     }
   }, [selectedSession])
+
+  // Set default selected class when modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      setSelectedClasses([currentClass])
+    }
+  }, [showCreateModal, currentClass])
 
   const loadSessions = async () => {
     try {
@@ -73,32 +120,51 @@ export default function AttendanceSection() {
   const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!startTime || !endTime) {
-      toast.error('Please fill in all required fields')
+      toast.error('Please fill in start and end times')
+      return
+    }
+
+    if (selectedClasses.length === 0) {
+      toast.error('Please select at least one class')
       return
     }
 
     try {
       const title = sessionTitle || `Session at ${new Date().toLocaleString()}`
-      await createSession({
+      
+      const newSessions = selectedClasses.map(className => ({
         title,
         start_time: startTime,
         end_time: endTime,
-        class_name: currentClass
-      })
+        class_name: className
+      }))
+
+      await createSessions(newSessions)
       
-      toast.success(`Created session: ${title}`)
-      setShowCreateForm(false)
+      toast.success(`Created session for ${selectedClasses.join(', ')}`)
+      setShowCreateModal(false)
       setSessionTitle('')
       setStartTime('')
       setEndTime('')
-      loadSessions()
+      setSelectedClasses([])
+      
+      // Reload sessions if the current class was one of the selected classes
+      if (selectedClasses.includes(currentClass)) {
+        loadSessions()
+      }
     } catch (error) {
-      toast.error('Failed to create session')
+      toast.error('Failed to create sessions')
     }
   }
 
   const handleAttendanceUpdate = async (studentId: string, status: AttendanceStatus) => {
     if (!selectedSession) return
+    
+    // If the student is selected, update all selected students
+    if (selectedStudents.includes(studentId)) {
+      handleMultipleAttendanceUpdate(status)
+      return
+    }
     
     try {
       await updateAttendanceStatus(studentId, selectedSession.id, status)
@@ -139,7 +205,7 @@ export default function AttendanceSection() {
       const rangeIds = students.slice(start, end + 1).map(s => s.id)
       selectMultipleStudents([...new Set([...selectedStudents, ...rangeIds])])
     } else {
-      // Single selection
+      // Single selection enabled
       selectMultipleStudents([studentId])
     }
   }
@@ -162,6 +228,11 @@ export default function AttendanceSection() {
     return record?.status || 'n/a'
   }
 
+  const getNotificationStatus = (studentId: string): 'pending' | 'sent' | 'dismissed' | undefined => {
+    const record = attendanceRecords.find(r => r.student_id === studentId)
+    return record?.notification_status
+  }
+
   const getStatusColor = (status: AttendanceStatus): string => {
     switch (status) {
       case 'present': return 'status-present'
@@ -173,6 +244,14 @@ export default function AttendanceSection() {
     }
   }
 
+  const toggleClassSelection = (className: ClassName) => {
+    setSelectedClasses(prev => 
+      prev.includes(className)
+        ? prev.filter(c => c !== className)
+        : [...prev, className]
+    )
+  }
+
   return (
     <div className="terminal-container h-full">
       <div className="terminal-section-header">
@@ -182,74 +261,98 @@ export default function AttendanceSection() {
       <div className="terminal-content">
         {!selectedSession ? (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center mb-2">
               <h3 className="text-orange">Sessions</h3>
               <button 
-                onClick={() => setShowCreateForm(true)}
+                onClick={() => setShowCreateModal(true)}
                 className="terminal-button"
               >
                 Create Session
               </button>
             </div>
 
-            {showCreateForm && (
-              <div className="mb-4 p-4 border border-border-color">
-                <h4 className="text-orange mb-2">Create New Session</h4>
-                <form onSubmit={handleCreateSession} className="space-y-2">
+            <Modal
+              isOpen={showCreateModal}
+              onClose={() => setShowCreateModal(false)}
+              title="Create New Session"
+            >
+              <form onSubmit={handleCreateSession} className="space-y-4">
+                <div>
+                  <label className="block text-secondary mb-1">Title (optional)</label>
+                  <input
+                    type="text"
+                    value={sessionTitle}
+                    onChange={(e) => setSessionTitle(e.target.value)}
+                    className="terminal-input w-full"
+                    placeholder="Defaults to current date/time"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-secondary mb-1">Title (optional)</label>
+                    <label className="block text-secondary mb-1">Start Time *</label>
                     <input
-                      type="text"
-                      value={sessionTitle}
-                      onChange={(e) => setSessionTitle(e.target.value)}
+                      type="datetime-local"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
                       className="terminal-input w-full"
-                      placeholder="Defaults to current date/time"
+                      required
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-secondary mb-1">Start Time *</label>
-                      <input
-                        type="datetime-local"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="terminal-input w-full"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-secondary mb-1">End Time *</label>
-                      <input
-                        type="datetime-local"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="terminal-input w-full"
-                        required
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-secondary mb-1">End Time *</label>
+                    <input
+                      type="datetime-local"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                      className="terminal-input w-full"
+                      required
+                    />
                   </div>
-                  <div className="flex space-x-2">
-                    <button type="submit" className="terminal-button">
-                      Create
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => setShowCreateForm(false)}
-                      className="terminal-button"
-                    >
-                      Cancel
-                    </button>
+                </div>
+                
+                <div>
+                  <label className="block text-secondary mb-2">Assign to Classes *</label>
+                  <div className="flex flex-wrap gap-4">
+                    {AVAILABLE_CLASSES.map((className) => (
+                      <label 
+                        key={className}
+                        className="flex items-center space-x-2 cursor-pointer text-secondary hover:text-white"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedClasses.includes(className)}
+                          onChange={() => toggleClassSelection(className)}
+                          className="cursor-pointer"
+                        />
+                        <span className={selectedClasses.includes(className) ? 'text-cyan' : ''}>
+                          {className}
+                        </span>
+                      </label>
+                    ))}
                   </div>
-                </form>
-              </div>
-            )}
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-4 border-t border-border-color">
+                  <button 
+                    type="button" 
+                    onClick={() => setShowCreateModal(false)}
+                    className="terminal-button"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="terminal-button text-cyan border-cyan">
+                    Create Session
+                  </button>
+                </div>
+              </form>
+            </Modal>
 
             <div className="terminal-grid">
               {sessions.map((session) => (
                 <div 
                   key={session.id}
                   className="terminal-grid-item cursor-pointer hover:bg-gray-900"
-                  onClick={() => setSelectedSession(session)}
+                  onClick={() => handleSessionSelect(session)}
                 >
                   <div className="font-bold text-cyan">{session.title}</div>
                   <div className="text-secondary text-xs">
@@ -261,21 +364,22 @@ export default function AttendanceSection() {
           </div>
         ) : (
           <div>
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <button 
-                  onClick={() => setSelectedSession(null)}
-                  className="terminal-button mr-2"
-                >
-                  ← Back to Sessions
-                </button>
-                <span className="text-orange font-bold">{selectedSession.title}</span>
-              </div>
-              {selectedStudents.length > 0 && (
-                <div className="text-secondary">
-                  {selectedStudents.length} students selected (Right-click for bulk actions)
+            <div className="flex justify-between items-start">
+              <div className='flex flex-row gap-2 items-center ml-2'>
+                <div className="flex items-center gap-2">
+                  <span className="text-orange font-bold text-lg">{selectedSession.title}</span>
                 </div>
-              )}
+                <div className="flex flex-row gap-5 text-xs text-secondary ml-2">
+                  <div>Time: <span className="text-white">{new Date(selectedSession.start_time).toLocaleString()} - {new Date(selectedSession.end_time).toLocaleString()}</span></div>
+                  <div>Session for: <span className="text-cyan">{relatedSessionsMap.map(s => s.class_name).join(', ')}</span></div>
+                </div>
+              </div>
+              <button 
+                onClick={handleBack}
+                className="bg-[#111111] hover:bg-[#222222] rounded-md border border-zinc-700 border-b-0 p-2 hover:cursor-pointer hover:text-orange-500"
+              >
+                ← Back to Sessions
+              </button>
             </div>
 
             <div className="overflow-x-auto" onContextMenu={handleRightClick}>
@@ -284,18 +388,20 @@ export default function AttendanceSection() {
                   <tr>
                     <th>Student Name</th>
                     <th>Status</th>
+                    <th>Notification</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((student) => {
                     const status = getAttendanceStatus(student.id)
+                    const notificationStatus = getNotificationStatus(student.id)
                     const isSelected = selectedStudents.includes(student.id)
                     
                     return (
                       <tr 
                         key={student.id}
-                        className={`cursor-pointer ${isSelected ? 'bg-gray-800' : ''}`}
+                        className={`terminal-row cursor-pointer ${isSelected ? 'selected' : ''}`}
                         onClick={(e) => handleStudentClick(student.id, e)}
                       >
                         <td>{student.name}</td>
@@ -317,6 +423,12 @@ export default function AttendanceSection() {
                             <option value="excused absence">Excused Absence</option>
                           </select>
                         </td>
+                        <td className="text-xs text-secondary">
+                          {notificationStatus === 'sent' && <span className="text-green-500">SENT</span>}
+                          {notificationStatus === 'dismissed' && <span className="text-gray-500">DISMISSED</span>}
+                          {notificationStatus === 'pending' && <span className="text-orange">PENDING</span>}
+                          {!notificationStatus && '-'}
+                        </td>
                       </tr>
                     )
                   })}
@@ -324,8 +436,13 @@ export default function AttendanceSection() {
               </table>
             </div>
 
-            <div className="mt-4 text-secondary text-xs">
-              Click to select, Ctrl+Click to toggle, Shift+Click for range selection
+            <div className="mt-4 text-secondary text-xs flex justify-between items-center">
+              <div>Click to select, Ctrl+Click to toggle, Shift+Click for range selection</div>
+              {selectedStudents.length > 0 && (
+                <div>
+                  {selectedStudents.length} students selected (Right-click for bulk actions)
+                </div>
+              )}
             </div>
           </div>
         )}

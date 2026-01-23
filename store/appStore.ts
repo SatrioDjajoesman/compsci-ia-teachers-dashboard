@@ -3,6 +3,7 @@ import { ClassName, Student, Session, Task, AttendanceRecord, TaskSubmission, Em
 
 interface AppState {
   currentClass: ClassName
+  allowedClasses: ClassName[] | null
   students: Student[]
   sessions: Session[]
   tasks: Task[]
@@ -13,6 +14,7 @@ interface AppState {
   
   // Actions
   setCurrentClass: (className: ClassName) => void
+  setAllowedClasses: (classes: ClassName[] | null) => void
   setStudents: (students: Student[]) => void
   setSessions: (sessions: Session[]) => void
   setTasks: (tasks: Task[]) => void
@@ -26,6 +28,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   currentClass: '11A',
+  allowedClasses: null,
   students: [],
   sessions: [],
   tasks: [],
@@ -35,6 +38,7 @@ export const useAppStore = create<AppState>((set) => ({
   loading: false,
   
   setCurrentClass: (className) => set({ currentClass: className }),
+  setAllowedClasses: (classes) => set({ allowedClasses: classes }),
   setStudents: (students) => set({ students }),
   setSessions: (sessions) => set({ sessions }),
   setTasks: (tasks) => set({ tasks }),

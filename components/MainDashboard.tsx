@@ -101,31 +101,31 @@ export default function MainDashboard() {
             onClick={() => setActiveTab('attendance')}
             className={`terminal-nav-item ${activeTab === 'attendance' ? 'active' : ''}`}
           >
-            ATTENDANCE (Ctrl+A)
+            ATTENDANCE
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
             className={`terminal-nav-item ${activeTab === 'tasks' ? 'active' : ''}`}
           >
-            TASKS (Ctrl+T)
+            TASKS
           </button>
           <button
             onClick={() => setActiveTab('students')}
             className={`terminal-nav-item ${activeTab === 'students' ? 'active' : ''}`}
           >
-            STUDENTS (Ctrl+S)
+            STUDENTS
           </button>
           <button
             onClick={() => setActiveTab('mail')}
             className={`terminal-nav-item ${activeTab === 'mail' ? 'active' : ''}`}
           >
-            MAIL (Ctrl+M)
+            MAIL
           </button>
           <button
             onClick={() => setActiveTab('settings')}
             className={`terminal-nav-item ${activeTab === 'settings' ? 'active' : ''}`}
           >
-            SETTINGS (Ctrl+,)
+            SETTINGS
           </button>
         </div>
       </nav>

@@ -7,6 +7,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 // Types
 export type ClassName = '11A' | '11B' | '11C' | '11D'
+export const AVAILABLE_CLASSES: ClassName[] = ['11A', '11B', '11C', '11D']
 
 export interface Student {
   id: string
@@ -43,6 +44,7 @@ export interface AttendanceRecord {
   session_id: string
   status: AttendanceStatus
   updated_at: string
+  notification_status?: 'pending' | 'sent' | 'dismissed'
 }
 
 export interface TaskSubmission {
@@ -51,6 +53,7 @@ export interface TaskSubmission {
   task_id: string
   status: TaskStatus
   updated_at: string
+  notification_status?: 'pending' | 'sent' | 'dismissed'
 }
 
 export interface EmailTemplate {
@@ -87,8 +90,32 @@ export async function initializeDatabase() {
       await createTables()
       await insertSampleData()
     }
+
+    // Ensure notification columns exist (migration for existing databases)
+    await ensureNotificationColumns()
   } catch (error) {
     console.error('Database initialization error:', error)
+  }
+}
+
+async function ensureNotificationColumns() {
+  try {
+    await supabase.rpc('exec_sql', {
+      sql: `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'attendance_records' AND column_name = 'notification_status') THEN
+            ALTER TABLE attendance_records ADD COLUMN notification_status TEXT CHECK (notification_status IN ('pending', 'sent', 'dismissed'));
+          END IF;
+          
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'task_submissions' AND column_name = 'notification_status') THEN
+            ALTER TABLE task_submissions ADD COLUMN notification_status TEXT CHECK (notification_status IN ('pending', 'sent', 'dismissed'));
+          END IF;
+        END $$;
+      `
+    })
+  } catch (error) {
+    console.error('Error ensuring notification columns:', error)
   }
 }
 
@@ -320,6 +347,26 @@ export async function getStudentById(studentId: string) {
   return data
 }
 
+export async function createStudent(student: Omit<Student, 'id'>) {
+  const { data, error } = await supabase
+    .from('students')
+    .insert([student])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+export async function deleteStudent(studentId: string) {
+  const { error } = await supabase
+    .from('students')
+    .delete()
+    .eq('id', studentId)
+  
+  if (error) throw error
+}
+
 // Session operations
 export async function getSessionsByClass(className: ClassName) {
   const { data, error } = await supabase
@@ -338,6 +385,28 @@ export async function createSession(session: Omit<Session, 'id' | 'created_at'>)
     .insert([session])
     .select()
     .single()
+  
+  if (error) throw error
+  return data
+}
+
+export async function createSessions(sessions: Omit<Session, 'id' | 'created_at'>[]) {
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert(sessions)
+    .select()
+  
+  if (error) throw error
+  return data
+}
+
+export async function getRelatedSessions(title: string, startTime: string, endTime: string) {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('title', title)
+    .eq('start_time', startTime)
+    .eq('end_time', endTime)
   
   if (error) throw error
   return data
@@ -372,6 +441,26 @@ export async function createTask(task: Omit<Task, 'id' | 'created_at'>) {
     .insert([task])
     .select()
     .single()
+  
+  if (error) throw error
+  return data
+}
+
+export async function createTasks(tasks: Omit<Task, 'id' | 'created_at'>[]) {
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert(tasks)
+    .select()
+  
+  if (error) throw error
+  return data
+}
+
+export async function getRelatedTasks(title: string) {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('title', title)
   
   if (error) throw error
   return data
@@ -485,6 +574,32 @@ export async function updateMultipleTaskSubmissionStatus(studentIds: string[], t
       onConflict: 'student_id,task_id'
     })
     .select()
+  
+  if (error) throw error
+  return data
+}
+
+export async function updateAttendanceNotificationStatus(studentId: string, sessionId: string, status: 'pending' | 'sent' | 'dismissed') {
+  const { data, error } = await supabase
+    .from('attendance_records')
+    .update({ notification_status: status })
+    .eq('student_id', studentId)
+    .eq('session_id', sessionId)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+export async function updateTaskSubmissionNotificationStatus(studentId: string, taskId: string, status: 'pending' | 'sent' | 'dismissed') {
+  const { data, error } = await supabase
+    .from('task_submissions')
+    .update({ notification_status: status })
+    .eq('student_id', studentId)
+    .eq('task_id', taskId)
+    .select()
+    .single()
   
   if (error) throw error
   return data
@@ -624,4 +739,20 @@ export async function getStudentAnalytics(studentId: string) {
       truancyRate: totalSessions > 0 ? (truantSessions / totalSessions * 100).toFixed(1) : '0'
     }
   }
+}
+export async function logManualEmail(studentId: string | null, recipientEmail: string, subject: string, body: string) {
+  const { data, error } = await supabase
+    .from('sent_emails')
+    .insert([{
+      student_id: studentId,
+      recipient_email: recipientEmail,
+      subject,
+      body,
+      violation_type: 'Manual'
+    }])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
 }
