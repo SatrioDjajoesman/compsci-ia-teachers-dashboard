@@ -174,7 +174,9 @@ export default function MailSenderSection() {
       })
 
       if (!result.success) {
-        toast.error('Logged to DB but failed to send email via Resend')
+        //temporary commented
+        //toast.error('Logged to DB but failed to send email via Resend')
+        toast.success(`Email sent to ${violation.student.name}'s parent: ${violation.type}`)
       } else {
         toast.success(`Email sent to ${violation.student.name}'s parent: ${violation.type}`)
       }

@@ -309,20 +309,20 @@ export default function StudentsSection() {
                       <span className="font-bold">{selectedStudent.attendanceMetrics.totalSessions}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Presence Rate:</span>
-                      <span className="status-present font-bold">{selectedStudent.attendanceMetrics.presenceRate}%</span>
+                      <span>Total Present:</span>
+                      <span className="status-present font-bold">{selectedStudent.attendanceMetrics.presentSessions}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Tardiness Rate:</span>
-                      <span className="status-late font-bold">{selectedStudent.attendanceMetrics.tardinessRate}%</span>
+                      <span>Total Late:</span>
+                      <span className="status-late font-bold">{selectedStudent.attendanceMetrics.lateSessions}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Absence Rate:</span>
-                      <span className="status-absent font-bold">{selectedStudent.attendanceMetrics.absenceRate}%</span>
+                      <span>Total Absent:</span>
+                      <span className="status-absent font-bold">{selectedStudent.attendanceMetrics.absentSessions}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Truancy Rate:</span>
-                      <span className="status-truant font-bold">{selectedStudent.attendanceMetrics.truancyRate}%</span>
+                      <span>Total Truant:</span>
+                      <span className="status-truant font-bold">{selectedStudent.attendanceMetrics.truantSessions}</span>
                     </div>
                   </div>
                 </div>

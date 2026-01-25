@@ -6,8 +6,6 @@ import toast from 'react-hot-toast'
 
 interface SettingsData {
   id: string
-  auto_send_email: boolean
-  email_delay_minutes: number
   task_late_submission_hours: number
 }
 
@@ -80,41 +78,6 @@ export default function SettingsSection() {
       
       <div className="terminal-content">
         <div className="space-y-6">
-          {/* Email Settings */}
-          <div className="terminal-container">
-            <div className="terminal-section-header text-sm">EMAIL SETTINGS</div>
-            <div className="terminal-content space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-secondary">
-                  Enable automatic email sending
-                </label>
-                <input
-                  type="checkbox"
-                  checked={settings.auto_send_email}
-                  onChange={(e) => handleSettingChange('auto_send_email', e.target.checked)}
-                  className="terminal-input"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-secondary mb-2">
-                  Delay between emails (minutes)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="60"
-                  value={settings.email_delay_minutes}
-                  onChange={(e) => handleSettingChange('email_delay_minutes', parseInt(e.target.value) || 0)}
-                  className="terminal-input w-full"
-                />
-                <div className="text-tertiary text-xs mt-1">
-                  Time to wait between sending automated emails
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Task Settings */}
           <div className="terminal-container">
             <div className="terminal-section-header text-sm">TASK SETTINGS</div>

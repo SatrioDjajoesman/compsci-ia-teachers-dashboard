@@ -26,27 +26,18 @@ export default function MainDashboard() {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
-        switch (e.key) {
-          case 'a':
-            e.preventDefault()
-            setActiveTab('attendance')
-            break
-          case 't':
-            e.preventDefault()
-            setActiveTab('tasks')
-            break
-          case 's':
-            e.preventDefault()
-            setActiveTab('students')
-            break
-          case 'm':
-            e.preventDefault()
-            setActiveTab('mail')
-            break
-          case ',':
-            e.preventDefault()
-            setActiveTab('settings')
-            break
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault()
+          const tabs: TabType[] = ['attendance', 'tasks', 'students', 'mail', 'settings']
+          
+          setActiveTab(current => {
+            const currentIndex = tabs.indexOf(current)
+            if (e.key === 'ArrowRight') {
+              return tabs[(currentIndex + 1) % tabs.length]
+            } else {
+              return tabs[(currentIndex - 1 + tabs.length) % tabs.length]
+            }
+          })
         }
       }
     }
@@ -90,7 +81,7 @@ export default function MainDashboard() {
         <div className="text-orange font-bold">TEACHER DASHBOARD</div>
         <ClassNavigation />
         <div className="text-secondary text-xs">
-          Ctrl+A/T/S/M/, for tabs
+          Ctrl+←/→ to navigate tabs
         </div>
       </header>
 
