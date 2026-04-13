@@ -95,10 +95,6 @@ export default function AttendanceSection() {
   useEffect(() => {
     if (showCreateModal) {
       setSelectedClasses([currentClass])
-      // Default to today's date if empty, but we leave it empty to show placeholder or let user decide
-      // Actually requirement says: "if Date is not filled, it will automatically use Today's current date."
-      // So we can leave it empty in UI and handle it on submit, or pre-fill it.
-      // Let's pre-fill it for better UX? No, requirement says "if Date is not filled". implying it can be empty.
       setSessionDate('')
     }
   }, [showCreateModal, currentClass])
